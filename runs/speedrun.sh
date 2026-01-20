@@ -18,14 +18,14 @@ mkdir -p $NANOCHAT_BASE_DIR
 # -----------------------------------------------------------------------------
 # Python venv setup with uv
 
-# install uv (if not already installed)
-command -v uv &> /dev/null || curl -LsSf https://astral.sh/uv/install.sh | sh
-# create a .venv local virtual environment (if it doesn't exist)
-[ -d ".venv" ] || uv venv
-# install the repo dependencies
-uv sync --extra gpu
-# activate venv so that `python` uses the project's venv instead of system python
-source .venv/bin/activate
+# # install uv (if not already installed)
+# command -v uv &> /dev/null || curl -LsSf https://astral.sh/uv/install.sh | sh
+# # create a .venv local virtual environment (if it doesn't exist)
+# [ -d ".venv" ] || uv venv
+# # install the repo dependencies
+# uv sync --extra gpu
+# # activate venv so that `python` uses the project's venv instead of system python
+# source .venv/bin/activate
 
 # -----------------------------------------------------------------------------
 # wandb setup
@@ -79,9 +79,9 @@ wait $DATASET_DOWNLOAD_PID
 
 # Number of processes/GPUs to use
 NPROC_PER_NODE=8
-
+export CUDA_VISIBLE_DEVICES=0,1,2,3,5,6,7,9
 # pretrain the d20 model
-torchrun --standalone --nproc_per_node=$NPROC_PER_NODE -m scripts.base_train -- --depth=20 --target-param-data-ratio=20 --run=$WANDB_RUN
+torchrun --standalone --nproc_per_node=$NPROC_PER_NODE -m scripts.base_train -- --depth=10 --target-param-data-ratio=20 --run=$WANDB_RUN
 # evaluate the model on a larger chunk of train/val data and draw some samples
 torchrun --standalone --nproc_per_node=$NPROC_PER_NODE -m scripts.base_loss
 # evaluate the model on CORE tasks

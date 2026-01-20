@@ -115,9 +115,11 @@ def build_model(checkpoint_dir, step, device, phase):
     return model, tokenizer, meta_data
 
 
-def find_largest_model(checkpoints_dir):
+def find_largest_model(checkpoints_dir, suffix=None):
     # attempt to guess the model tag: take the biggest model available
     model_tags = [f for f in os.listdir(checkpoints_dir) if os.path.isdir(os.path.join(checkpoints_dir, f))]
+    if suffix:
+        model_tags = [f for f in model_tags if f.endswith(suffix)]
     if not model_tags:
         raise FileNotFoundError(f"No checkpoints found in {checkpoints_dir}")
     # 1) normally all model tags are of the form d<number>, try that first:
@@ -146,10 +148,10 @@ def find_last_step(checkpoint_dir):
 # -----------------------------------------------------------------------------
 # convenience functions that take into account nanochat's directory structure
 
-def load_model_from_dir(checkpoints_dir, device, phase, model_tag=None, step=None):
+def load_model_from_dir(checkpoints_dir, device, phase, model_tag=None, step=None, suffix=None):
     if model_tag is None:
         # guess the model tag by defaulting to the largest model
-        model_tag = find_largest_model(checkpoints_dir)
+        model_tag = find_largest_model(checkpoints_dir, suffix=suffix)
         log0(f"No model tag provided, guessing model tag: {model_tag}")
     checkpoint_dir = os.path.join(checkpoints_dir, model_tag)
     if step is None:
@@ -166,8 +168,10 @@ def load_model(source, *args, **kwargs):
         "base": "base_checkpoints",
         "mid": "mid_checkpoints",
         "sft": "chatsft_checkpoints",
+        "sft-safety": "chatsft_checkpoints",
         "rl": "chatrl_checkpoints",
     }[source]
+    suffix = "_safety" if source == "sft-safety" else None
     base_dir = get_base_dir()
     checkpoints_dir = os.path.join(base_dir, model_dir)
-    return load_model_from_dir(checkpoints_dir, *args, **kwargs)
+    return load_model_from_dir(checkpoints_dir, *args, suffix=suffix, **kwargs)

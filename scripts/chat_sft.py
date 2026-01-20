@@ -60,6 +60,8 @@ parser.add_argument("--eval-every", type=int, default=100, help="evaluate val lo
 parser.add_argument("--eval-steps", type=int, default=100, help="number of batches for val loss evaluation")
 parser.add_argument("--eval-metrics-every", type=int, default=200, help="evaluate accuracy metrics every N steps")
 parser.add_argument("--eval-metrics-max-problems", type=int, default=1024, help="max problems per metric evaluation")
+# Safety SFT
+parser.add_argument("--safety-sft", action="store_true", help="include safety SFT data in training")
 args = parser.parse_args()
 user_config = vars(args).copy()
 # -----------------------------------------------------------------------------
@@ -73,7 +75,8 @@ autocast_ctx = torch.amp.autocast(device_type=device_type, dtype=ptdtype) if dev
 
 # wandb logging init
 use_dummy_wandb = args.run == "dummy" or not master_process
-wandb_run = DummyWandb() if use_dummy_wandb else wandb.init(project="nanochat-sft", name=args.run, config=user_config, save_code=True)
+wandb_project = "nanochat-sft-safety" if args.safety_sft else "nanochat-sft"
+wandb_run = DummyWandb() if use_dummy_wandb else wandb.init(project=wandb_project, name=args.run, config=user_config, save_code=True)
 
 # Load the model and tokenizer
 model, tokenizer, meta = load_model(args.source, device, phase="train", model_tag=args.model_tag, step=args.model_step)
@@ -84,7 +87,7 @@ engine = Engine(model, tokenizer) # will be used for inline model evaluation onl
 # -----------------------------------------------------------------------------
 # Task data mixture we'll train on
 identity_conversations_filepath = os.path.join(get_base_dir(), "identity_conversations.jsonl")
-train_ds = TaskMixture([
+base_tasks = [
     ARC(subset="ARC-Easy", split="train"), # 2.3K rows
     ARC(subset="ARC-Challenge", split="train"), # 1.1K rows
     GSM8K(subset="main", split="train"), # 8K rows
@@ -92,7 +95,13 @@ train_ds = TaskMixture([
     CustomJSON(filepath=identity_conversations_filepath), # 1K rows of synthetic identity conversations
     SimpleSpelling(size=300, split="train"), # 300 rows of Simple Spelling (e.g. spell the word 'apple')
     SpellingBee(size=300, split="train"), # 300 rows of Spelling Bee (e.g. how many 'r' are in 'strawberry'?)
-]) # 2.3K + 1.1K + 8K + 10K + 1K + 0.3K + 0.3K = 23K rows
+] # 2.3K + 1.1K + 8K + 10K + 1K + 0.3K + 0.3K = 23K rows
+# Optionally add safety SFT data
+if args.safety_sft:
+    safety_sft_filepath = os.path.join(get_base_dir(), "safety_sft_500.jsonl")
+    base_tasks.append(CustomJSON(filepath=safety_sft_filepath)) # 500 rows of safety refusal conversations
+    print0(f"Including safety SFT data from {safety_sft_filepath}")
+train_ds = TaskMixture(base_tasks)
 val_ds = SmolTalk(split="test") # general conversations, 24K rows (though we don't actually use all of it)
 
 # -----------------------------------------------------------------------------
@@ -256,6 +265,8 @@ if master_process:
     base_dir = get_base_dir()
     depth = model.config.n_layer
     output_dirname = args.model_tag if args.model_tag else f"d{depth}" # e.g. d12
+    if args.safety_sft:
+        output_dirname = f"{output_dirname}_safety" # e.g. d12_safety
     checkpoint_dir = os.path.join(base_dir, "chatsft_checkpoints", output_dirname)
     model_config_kwargs = model.config.__dict__ # slightly naughty, abusing the simplicity of GPTConfig, TODO nicer
     save_checkpoint(
@@ -274,13 +285,15 @@ if master_process:
 
 # Log to report
 from nanochat.report import get_report
-get_report().log(section="Chat SFT", data=[
+report_section = "Chat SFT Safety" if args.safety_sft else "Chat SFT"
+get_report().log(section=report_section, data=[
     user_config, # CLI args
     {
         "Training rows": len(train_ds),
         "Number of iterations": num_iterations,
         "Training loss": train_loss_item,
         "Validation loss": val_loss,
+        "Safety SFT": args.safety_sft,
     },
 ])
 
